@@ -32,6 +32,7 @@ lon_wide <- c(173.8, 176.5)
 # Dataset: cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D
 # Sentinel-3A and 3B are merged into this single daily composite (2016–present).
 # 7-day window used to maximise cloud-free coverage.
+# Data download is delegated to fetch_cmems.sh (copernicusmarine CLI wrapper).
 # Requires: copernicusmarine Python package + free CMEMS credentials
 #   Install: pip install copernicusmarine
 #   Authenticate once: copernicusmarine login
@@ -39,24 +40,22 @@ lon_wide <- c(173.8, 176.5)
 
 fetch_cmems_mean <- function(dataset_id, var, time_start, time_end,
                              lon_range, lat_range) {
-  tmp <- tempfile(fileext = ".nc")
+  tmp    <- tempfile(fileext = ".nc")
+  script <- "fetch_cmems.sh"   # run from the project root directory
   cmd <- paste(
-    "copernicusmarine subset",
-    paste0("--dataset-id ",        dataset_id),
-    paste0("--variable ",          var),
-    paste0("--start-datetime ",    time_start),
-    paste0("--end-datetime ",      time_end),
-    paste0("--minimum-latitude ",  lat_range[1]),
-    paste0("--maximum-latitude ",  lat_range[2]),
-    paste0("--minimum-longitude ", lon_range[1]),
-    paste0("--maximum-longitude ", lon_range[2]),
-    "--force-download",
-    paste0("--output-filename ",   shQuote(tmp))
+    shQuote(script),
+    shQuote(dataset_id),
+    shQuote(var),
+    shQuote(time_start),
+    shQuote(time_end),
+    lat_range[1], lat_range[2],
+    lon_range[1], lon_range[2],
+    shQuote(tmp)
   )
   exit_code <- system(cmd, wait = TRUE)
   if (exit_code != 0) {
     stop(
-      "copernicusmarine subset failed (exit code ", exit_code, ").\n",
+      "fetch_cmems.sh failed (exit code ", exit_code, ").\n",
       "Check credentials (run: copernicusmarine login) and that the dataset ID is correct.\n",
       "Command: ", cmd
     )
