@@ -38,27 +38,33 @@ lon_wide <- c(173.8, 176.5)
 #   Authenticate once: copernicusmarine login
 #   Register: https://data.marine.copernicus.eu/
 
+# Resolve fetch_cmems.sh once, relative to this R script; fall back to working directory
+.cmems_args       <- commandArgs(trailingOnly = FALSE)
+.cmems_file_args  <- grep("--file=", .cmems_args, value = TRUE)
+.cmems_script_dir <- if (length(.cmems_file_args))
+                       dirname(normalizePath(sub("--file=", "", .cmems_file_args[1]),
+                                            mustWork = FALSE))
+                     else
+                       "."
+.cmems_script <- file.path(.cmems_script_dir, "fetch_cmems.sh")
+
 fetch_cmems_mean <- function(dataset_id, var, time_start, time_end,
                              lon_range, lat_range) {
+  if (!file.exists(.cmems_script)) {
+    stop(
+      "fetch_cmems.sh not found at: ", .cmems_script, "\n",
+      "Ensure fetch_cmems.sh is in the same directory as map.R."
+    )
+  }
   tmp <- tempfile(fileext = ".nc")
-
-  # Resolve fetch_cmems.sh relative to this R script; fall back to working directory
-  args       <- commandArgs(trailingOnly = FALSE)
-  file_args  <- grep("--file=", args, value = TRUE)
-  script_dir <- if (length(file_args))
-                  dirname(normalizePath(sub("--file=", "", file_args[1]), mustWork = FALSE))
-                else
-                  "."
-  script <- file.path(script_dir, "fetch_cmems.sh")
-
   cmd <- paste(
-    shQuote(script),
+    shQuote(.cmems_script),
     shQuote(dataset_id),
     shQuote(var),
     shQuote(time_start),
     shQuote(time_end),
-    lat_range[1], lat_range[2],
-    lon_range[1], lon_range[2],
+    shQuote(as.character(lat_range[1])), shQuote(as.character(lat_range[2])),
+    shQuote(as.character(lon_range[1])), shQuote(as.character(lon_range[2])),
     shQuote(tmp)
   )
   exit_code <- system(cmd, wait = TRUE)
