@@ -1,5 +1,5 @@
-# Ocean map: OVL-style Sentinel-3A OLCI Chl-a + sample site fluorescence
-# Matches OVL product: Sentinel-3_OLCI_Chlorophyll_a_oc4me, Jan 2025
+# Ocean map: OVL-style Sentinel-3A/3B OLCI Chl-a + sample site fluorescence
+# Data product: Copernicus S-3A/3B OLCI, Sector RD 300m, Level 3, Near Real-Time, Daily
 
 library(rerddap)
 library(ggplot2)
@@ -27,16 +27,17 @@ sites <- data.frame(
 lat_wide <- c(-37.5, -35.4)
 lon_wide <- c(173.8, 176.5)
 
-# ── Sentinel-3A + 3B OLCI Chl-a (oc4me) from NOAA CoastWatch ERDDAP ──────────
+# ── Sentinel-3A + 3B OLCI Chl-a, Sector RD 300m, from NOAA CoastWatch ERDDAP ──
 # Both platforms are fetched and averaged to maximise cloud-free coverage.
-# 7-day window used because single days are ~90% cloud-masked in Jan.
+# 7-day window used because single days are ~90% cloud-masked.
+# NOTE: Sector RD NRT datasets cover only the most recent 90 days.
 erddap_url <- "https://coastwatch.noaa.gov/erddap/"
-ds_info_a  <- info("noaacwS3AOLCIchlaDaily", url = erddap_url)
-ds_info_b  <- info("noaacwS3BOLCIchlaDaily", url = erddap_url)
+ds_info_a  <- info("noaacwS3AOLCIchlaSectorRDDaily", url = erddap_url)
+ds_info_b  <- info("noaacwS3BOLCIchlaSectorRDDaily", url = erddap_url)
 
 fetch_mean <- function(ds) {
   griddap(ds,
-    time      = c("2025-01-01T00:00:00Z", "2025-01-07T23:59:59Z"),
+    time      = c("2026-05-26T00:00:00Z", "2026-06-01T23:59:59Z"),
     latitude  = lat_wide,
     longitude = lon_wide,
     fields    = "chlor_a"
@@ -127,11 +128,11 @@ ggplot() +
   ) +
   coord_sf(xlim = lon_wide, ylim = lat_wide, expand = FALSE) +
   labs(
-    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (oc4me)",
-    subtitle = "S3A + S3B 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
+    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (Sector RD 300m)",
+    subtitle = "S3A + S3B 7-day mean, 26 May – 1 Jun 2026  |  Sample sites coloured by in-situ fluorescence",
     x        = "Longitude",
     y        = "Latitude",
-    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI"
+    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI, Sector RD 300m NRT"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -192,10 +193,10 @@ ggplot() +
   ) +
   coord_sf(xlim = lon_zoom, ylim = lat_zoom, expand = FALSE) +
   labs(
-    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (oc4me)",
-    subtitle = "S3A + S3B 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
+    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (Sector RD 300m)",
+    subtitle = "S3A + S3B 7-day mean, 26 May – 1 Jun 2026  |  Sample sites coloured by in-situ fluorescence",
     x = "Longitude", y = "Latitude",
-    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI"
+    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI, Sector RD 300m NRT"
   ) +
   theme_minimal(base_size = 12) +
   theme(
