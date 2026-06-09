@@ -53,7 +53,14 @@ fetch_cmems_mean <- function(dataset_id, var, time_start, time_end,
     "--force-download",
     paste0("--output-filename ",   shQuote(tmp))
   )
-  system(cmd, wait = TRUE)
+  exit_code <- system(cmd, wait = TRUE)
+  if (exit_code != 0) {
+    stop(
+      "copernicusmarine subset failed (exit code ", exit_code, ").\n",
+      "Check credentials (run: copernicusmarine login) and that the dataset ID is correct.\n",
+      "Command: ", cmd
+    )
+  }
 
   nc      <- nc_open(tmp)
   lon_v   <- ncvar_get(nc, "longitude")
