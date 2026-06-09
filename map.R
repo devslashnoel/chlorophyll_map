@@ -1,7 +1,8 @@
 # Ocean map: OVL-style Sentinel-3A/3B OLCI Chl-a + sample site fluorescence
-# Data product: Copernicus S-3A/3B OLCI, Sector RD 300m, Level 3, Near Real-Time, Daily
+# Data product: CMEMS Global Ocean Colour, OLCI 300m, Level 3 Multi-Year daily
+# Dataset: cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D (S3A + S3B merged)
 
-library(rerddap)
+library(ncdf4)
 library(ggplot2)
 library(ggnewscale)
 library(ggrepel)
@@ -27,41 +28,54 @@ sites <- data.frame(
 lat_wide <- c(-37.5, -35.4)
 lon_wide <- c(173.8, 176.5)
 
-# ── Sentinel-3A + 3B OLCI Chl-a, Sector RD 300m, from NOAA CoastWatch ERDDAP ──
-# Both platforms are fetched and averaged to maximise cloud-free coverage.
-# 7-day window used because single days are ~90% cloud-masked.
-# NOTE: Sector RD NRT datasets cover only the most recent 90 days.
-erddap_url <- "https://coastwatch.noaa.gov/erddap/"
-ds_info_a  <- info("noaacwS3AOLCIchlaSectorRDDaily", url = erddap_url)
-ds_info_b  <- info("noaacwS3BOLCIchlaSectorRDDaily", url = erddap_url)
+# ── 300m OLCI Chl-a from Copernicus Marine Service (Multi-Year reprocessed) ────
+# Dataset: cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D
+# Sentinel-3A and 3B are merged into this single daily composite (2016–present).
+# 7-day window used to maximise cloud-free coverage.
+# Requires: copernicusmarine Python package + free CMEMS credentials
+#   Install: pip install copernicusmarine
+#   Authenticate once: copernicusmarine login
+#   Register: https://data.marine.copernicus.eu/
 
-fetch_mean <- function(ds) {
-  griddap(ds,
-    time      = c("2026-05-26T00:00:00Z", "2026-06-01T23:59:59Z"),
-    latitude  = lat_wide,
-    longitude = lon_wide,
-    fields    = "chlor_a"
-  )$data |>
-    group_by(latitude, longitude) |>
-    summarise(chlor_a = mean(chlor_a, na.rm = TRUE), .groups = "drop") |>
+fetch_cmems_mean <- function(dataset_id, var, time_start, time_end,
+                             lon_range, lat_range) {
+  tmp <- tempfile(fileext = ".nc")
+  cmd <- paste(
+    "copernicusmarine subset",
+    paste0("--dataset-id ",        dataset_id),
+    paste0("--variable ",          var),
+    paste0("--start-datetime ",    time_start),
+    paste0("--end-datetime ",      time_end),
+    paste0("--minimum-latitude ",  lat_range[1]),
+    paste0("--maximum-latitude ",  lat_range[2]),
+    paste0("--minimum-longitude ", lon_range[1]),
+    paste0("--maximum-longitude ", lon_range[2]),
+    "--force-download",
+    paste0("--output-filename ",   shQuote(tmp))
+  )
+  system(cmd, wait = TRUE)
+
+  nc      <- nc_open(tmp)
+  lon_v   <- ncvar_get(nc, "longitude")
+  lat_v   <- ncvar_get(nc, "latitude")
+  chl_arr <- ncvar_get(nc, var)          # dims in R: [lon × lat × time]
+  nc_close(nc)
+  file.remove(tmp)
+
+  chl_mean <- apply(chl_arr, c(1, 2), mean, na.rm = TRUE)
+  expand.grid(longitude = lon_v, latitude = lat_v) |>
+    mutate(chlor_a = as.vector(chl_mean)) |>
     filter(!is.na(chlor_a) & is.finite(chlor_a))
 }
 
-chla_a <- fetch_mean(ds_info_a)
-chla_b <- fetch_mean(ds_info_b)
-
-# Pixel-wise mean of both platforms; fall back to whichever is available
-chla_df <- full_join(
-  chla_a |> rename(chlor_a_a = chlor_a),
-  chla_b |> rename(chlor_a_b = chlor_a),
-  by = c("latitude", "longitude")
-) |>
-  mutate(chlor_a = case_when(
-    !is.na(chlor_a_a) & !is.na(chlor_a_b) ~ (chlor_a_a + chlor_a_b) / 2,
-    !is.na(chlor_a_a)                      ~ chlor_a_a,
-    !is.na(chlor_a_b)                      ~ chlor_a_b
-  )) |>
-  filter(!is.na(chlor_a))
+chla_df <- fetch_cmems_mean(
+  dataset_id  = "cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D",
+  var         = "CHL",
+  time_start  = "2025-01-01T00:00:00",
+  time_end    = "2025-01-07T23:59:59",
+  lon_range   = lon_wide,
+  lat_range   = lat_wide
+)
 
 # ── NZ high-resolution coastline ──────────────────────────────────────────────
 nz_coast <- ne_countries(country = "New Zealand", scale = "large", returnclass = "sf")
@@ -128,11 +142,11 @@ ggplot() +
   ) +
   coord_sf(xlim = lon_wide, ylim = lat_wide, expand = FALSE) +
   labs(
-    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (Sector RD 300m)",
-    subtitle = "S3A + S3B 7-day mean, 26 May – 1 Jun 2026  |  Sample sites coloured by in-situ fluorescence",
+    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (300m, S3A+S3B)",
+    subtitle = "CMEMS 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
     x        = "Longitude",
     y        = "Latitude",
-    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI, Sector RD 300m NRT"
+    caption  = "Satellite: Copernicus Marine Service / Sentinel-3A & 3B OLCI, 300m Multi-Year reprocessed"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -193,10 +207,10 @@ ggplot() +
   ) +
   coord_sf(xlim = lon_zoom, ylim = lat_zoom, expand = FALSE) +
   labs(
-    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (Sector RD 300m)",
-    subtitle = "S3A + S3B 7-day mean, 26 May – 1 Jun 2026  |  Sample sites coloured by in-situ fluorescence",
+    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (300m, S3A+S3B)",
+    subtitle = "CMEMS 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
     x = "Longitude", y = "Latitude",
-    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI, Sector RD 300m NRT"
+    caption  = "Satellite: Copernicus Marine Service / Sentinel-3A & 3B OLCI, 300m Multi-Year reprocessed"
   ) +
   theme_minimal(base_size = 12) +
   theme(
