@@ -40,8 +40,17 @@ lon_wide <- c(173.8, 176.5)
 
 fetch_cmems_mean <- function(dataset_id, var, time_start, time_end,
                              lon_range, lat_range) {
-  tmp    <- tempfile(fileext = ".nc")
-  script <- "fetch_cmems.sh"   # run from the project root directory
+  tmp <- tempfile(fileext = ".nc")
+
+  # Resolve fetch_cmems.sh relative to this R script; fall back to working directory
+  args       <- commandArgs(trailingOnly = FALSE)
+  file_args  <- grep("--file=", args, value = TRUE)
+  script_dir <- if (length(file_args))
+                  dirname(normalizePath(sub("--file=", "", file_args[1]), mustWork = FALSE))
+                else
+                  "."
+  script <- file.path(script_dir, "fetch_cmems.sh")
+
   cmd <- paste(
     shQuote(script),
     shQuote(dataset_id),
