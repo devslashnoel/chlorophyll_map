@@ -1,7 +1,8 @@
-# Ocean map: OVL-style Sentinel-3A OLCI Chl-a + sample site fluorescence
-# Matches OVL product: Sentinel-3_OLCI_Chlorophyll_a_oc4me, Jan 2025
+# Ocean map: OVL-style Sentinel-3A/3B OLCI Chl-a + sample site fluorescence
+# Data product: CMEMS Global Ocean Colour, OLCI 300m, Level 3 Multi-Year daily
+# Dataset: cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D (S3A + S3B merged)
 
-library(rerddap)
+library(ncdf4)
 library(ggplot2)
 library(ggnewscale)
 library(ggrepel)
@@ -27,40 +28,75 @@ sites <- data.frame(
 lat_wide <- c(-37.5, -35.4)
 lon_wide <- c(173.8, 176.5)
 
-# ── Sentinel-3A + 3B OLCI Chl-a (oc4me) from NOAA CoastWatch ERDDAP ──────────
-# Both platforms are fetched and averaged to maximise cloud-free coverage.
-# 7-day window used because single days are ~90% cloud-masked in Jan.
-erddap_url <- "https://coastwatch.noaa.gov/erddap/"
-ds_info_a  <- info("noaacwS3AOLCIchlaDaily", url = erddap_url)
-ds_info_b  <- info("noaacwS3BOLCIchlaDaily", url = erddap_url)
+# ── 300m OLCI Chl-a from Copernicus Marine Service (Multi-Year reprocessed) ────
+# Dataset: cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D
+# Sentinel-3A and 3B are merged into this single daily composite (2016–present).
+# 7-day window used to maximise cloud-free coverage.
+# Data download is delegated to fetch_cmems.sh (copernicusmarine CLI wrapper).
+# Requires: copernicusmarine Python package + free CMEMS credentials
+#   Install: pip install copernicusmarine
+#   Authenticate once: copernicusmarine login
+#   Register: https://data.marine.copernicus.eu/
 
-fetch_mean <- function(ds) {
-  griddap(ds,
-    time      = c("2025-01-01T00:00:00Z", "2025-01-07T23:59:59Z"),
-    latitude  = lat_wide,
-    longitude = lon_wide,
-    fields    = "chlor_a"
-  )$data |>
-    group_by(latitude, longitude) |>
-    summarise(chlor_a = mean(chlor_a, na.rm = TRUE), .groups = "drop") |>
+# Resolve fetch_cmems.sh once, relative to this R script; fall back to working directory
+.cmems_args       <- commandArgs(trailingOnly = FALSE)
+.cmems_file_args  <- grep("--file=", .cmems_args, value = TRUE)
+.cmems_script_dir <- if (length(.cmems_file_args))
+                       dirname(normalizePath(sub("--file=", "", .cmems_file_args[1]),
+                                            mustWork = FALSE))
+                     else
+                       "."
+.cmems_script <- file.path(.cmems_script_dir, "fetch_cmems.sh")
+
+fetch_cmems_mean <- function(dataset_id, var, time_start, time_end,
+                             lon_range, lat_range) {
+  if (!file.exists(.cmems_script)) {
+    stop(
+      "fetch_cmems.sh not found at: ", .cmems_script, "\n",
+      "Ensure fetch_cmems.sh is in the same directory as map.R."
+    )
+  }
+  tmp <- tempfile(fileext = ".nc")
+  cmd <- paste(
+    shQuote(.cmems_script),
+    shQuote(dataset_id),
+    shQuote(var),
+    shQuote(time_start),
+    shQuote(time_end),
+    shQuote(as.character(lat_range[1])), shQuote(as.character(lat_range[2])),
+    shQuote(as.character(lon_range[1])), shQuote(as.character(lon_range[2])),
+    shQuote(tmp)
+  )
+  exit_code <- system(cmd, wait = TRUE)
+  if (exit_code != 0) {
+    stop(
+      "fetch_cmems.sh failed (exit code ", exit_code, ").\n",
+      "Check credentials (run: copernicusmarine login) and that the dataset ID is correct.\n",
+      "Command: ", cmd
+    )
+  }
+
+  nc      <- nc_open(tmp)
+  lon_v   <- ncvar_get(nc, "longitude")
+  lat_v   <- ncvar_get(nc, "latitude")
+  chl_arr <- ncvar_get(nc, var)          # dims in R: [lon × lat × time]
+  nc_close(nc)
+  file.remove(tmp)
+
+  chl_mean <- apply(chl_arr, c(1, 2), mean, na.rm = TRUE)
+  expand.grid(longitude = lon_v, latitude = lat_v) |>
+    mutate(chlor_a = as.vector(chl_mean)) |>
     filter(!is.na(chlor_a) & is.finite(chlor_a))
 }
 
-chla_a <- fetch_mean(ds_info_a)
-chla_b <- fetch_mean(ds_info_b)
-
-# Pixel-wise mean of both platforms; fall back to whichever is available
-chla_df <- full_join(
-  chla_a |> rename(chlor_a_a = chlor_a),
-  chla_b |> rename(chlor_a_b = chlor_a),
-  by = c("latitude", "longitude")
-) |>
-  mutate(chlor_a = case_when(
-    !is.na(chlor_a_a) & !is.na(chlor_a_b) ~ (chlor_a_a + chlor_a_b) / 2,
-    !is.na(chlor_a_a)                      ~ chlor_a_a,
-    !is.na(chlor_a_b)                      ~ chlor_a_b
-  )) |>
-  filter(!is.na(chlor_a))
+chla_df <- fetch_cmems_mean(
+  dataset_id  = "cmems_obs-oc_glo_bgc-plankton_my_l3-olci-300m_P1D",
+  var         = "CHL",
+  time_start  = "2025-01-01T00:00:00",
+  time_end    = "2025-01-07T23:59:59",
+  lon_range   = lon_wide,
+  lat_range   = lat_wide
+)
 
 # ── NZ high-resolution coastline ──────────────────────────────────────────────
 nz_coast <- ne_countries(country = "New Zealand", scale = "large", returnclass = "sf")
@@ -127,11 +163,11 @@ ggplot() +
   ) +
   coord_sf(xlim = lon_wide, ylim = lat_wide, expand = FALSE) +
   labs(
-    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (oc4me)",
-    subtitle = "S3A + S3B 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
+    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (300m, S3A+S3B)",
+    subtitle = "CMEMS 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
     x        = "Longitude",
     y        = "Latitude",
-    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI"
+    caption  = "Satellite: Copernicus Marine Service / Sentinel-3A & 3B OLCI, 300m Multi-Year reprocessed"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -192,10 +228,10 @@ ggplot() +
   ) +
   coord_sf(xlim = lon_zoom, ylim = lat_zoom, expand = FALSE) +
   labs(
-    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (oc4me)",
-    subtitle = "S3A + S3B 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
+    title    = "Hauraki Gulf – Sentinel-3 OLCI Chlorophyll-a (300m, S3A+S3B)",
+    subtitle = "CMEMS 7-day mean, 1–7 January 2025  |  Sample sites coloured by in-situ fluorescence",
     x = "Longitude", y = "Latitude",
-    caption  = "Satellite: NOAA CoastWatch / Copernicus Sentinel-3A & 3B OLCI"
+    caption  = "Satellite: Copernicus Marine Service / Sentinel-3A & 3B OLCI, 300m Multi-Year reprocessed"
   ) +
   theme_minimal(base_size = 12) +
   theme(
